@@ -42,7 +42,12 @@ namespace Tools.Connections
                 using (DbCommand dbCommand = CreateCommand(command, dbConnection))
                 {
                     dbConnection.Open();
-                    return dbCommand.ExecuteNonQuery();
+                    int rows = dbCommand.ExecuteNonQuery();
+
+                    if (command.IsStoredProcedure)
+                        FinalizeQuery(command, dbCommand);
+
+                    return rows;
                 }                
             }
         }
@@ -59,8 +64,11 @@ namespace Tools.Connections
                         while(dataReader.Read())
                         {
                             yield return selector(dataReader);
-                        }
+                        }                        
                     }
+
+                    if (command.IsStoredProcedure)
+                        FinalizeQuery(command, dbCommand);
                 }
             }
         }
@@ -73,6 +81,9 @@ namespace Tools.Connections
                 {
                     dbConnection.Open();
                     object result = dbCommand.ExecuteScalar();
+
+                    if (command.IsStoredProcedure)
+                        FinalizeQuery(command, dbCommand);
 
                     return result is DBNull ? null : result;
                 }
@@ -91,6 +102,9 @@ namespace Tools.Connections
                         dbDataAdapter.SelectCommand = dbCommand;
                         dbDataAdapter.Fill(dataTable);
 
+                        if (command.IsStoredProcedure)
+                            FinalizeQuery(command, dbCommand);
+
                         return dataTable;
                     }
                 }
@@ -108,6 +122,9 @@ namespace Tools.Connections
                         DataSet dataSet = new DataSet();
                         dbDataAdapter.SelectCommand = dbCommand;
                         dbDataAdapter.Fill(dataSet);
+
+                        if (command.IsStoredProcedure)
+                            FinalizeQuery(command, dbCommand);
 
                         return dataSet;
                     }
@@ -131,16 +148,30 @@ namespace Tools.Connections
             if (command.IsStoredProcedure)
                 dbCommand.CommandType = CommandType.StoredProcedure;
 
-            foreach (KeyValuePair<string, object> parameter in command.Parameters)
+            foreach (KeyValuePair<string, Parameter> parameter in command.Parameters)
             {
                 DbParameter dbParameter = dbCommand.CreateParameter();
                 dbParameter.ParameterName = parameter.Key;
-                dbParameter.Value = parameter.Value;
+                dbParameter.Value = parameter.Value.ParameterValue;
+
+                if (parameter.Value.Direction == Direction.Output)
+                    dbParameter.Direction = ParameterDirection.Output;
 
                 dbCommand.Parameters.Add(dbParameter);
             }
 
             return dbCommand;
+        }
+
+        private void FinalizeQuery(Command command, DbCommand dbCommand)
+        {
+            foreach(KeyValuePair<string, Parameter> parameter in command.Parameters)
+            {
+                if(parameter.Value.Direction == Direction.Output)
+                {
+                    parameter.Value.ParameterValue = dbCommand.Parameters[parameter.Key].Value;
+                }
+            }
         }
     }
 }
